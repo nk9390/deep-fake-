@@ -1,0 +1,2 @@
+img1.jpg|A cat sitting on a sofa
+img2.jpg|A man riding a horse

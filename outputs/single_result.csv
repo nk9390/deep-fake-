@@ -1,0 +1,2 @@
+filename,phishing_prob,deepfake_prob,phishing_pred,deepfake_pred,text
+img10.jpg,0.4608,0.2602,0,0,"Image img10.jpg"
