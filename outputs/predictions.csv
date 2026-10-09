@@ -1,9 +1,0 @@
-filename,phishing_prob,deepfake_prob,phishing_pred,deepfake_pred,text
-img1.jpg,0.3789,0.4193,0,0,"A cat sitting on a sofa"
-img10.jpg,0.4424,0.4067,0,0,"Image img10.jpg"
-img11.jpg,0.36,0.4186,0,0,"Image img11.jpg"
-img12.jpg,0.4286,0.4425,0,0,"Image img12.jpg"
-img13.jpg,0.3638,0.3735,0,0,"Image img13.jpg"
-img2.jpg,0.3749,0.4167,0,0,"A man riding a horse"
-img3.jpg,0.4221,0.4345,0,0,"Image img3.jpg"
-img9.jpg,0.3937,0.4503,0,0,"Image img9.jpg"

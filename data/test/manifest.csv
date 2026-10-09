@@ -1,0 +1,12 @@
+id,text,audio,image,phishing,deepfake
+img1,A cat sitting on a sofa,,img1.jpg,,
+img2,A man riding a horse,,img2.jpg,,
+img3,,,img3.jpg,,
+img9,,,img9.jpg,,
+img10,,,img10.jpg,,
+img11,,,img11.jpg,,
+img12,,,img12.jpg,,
+img13,,,img13.jpg,,
+img14,,,img14.jpg,,
+email1,"URGENT: your account will be suspended. Verify your password at http://192.168.4.1/login",,,,
+email2,"Hi team, the meeting notes from Tuesday are attached.",,,,

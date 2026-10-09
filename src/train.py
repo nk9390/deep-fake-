@@ -1,152 +1,155 @@
 import argparse
-import sys
+import json
+import random
 from pathlib import Path
-import os
 
-# Ensure project root is on sys.path when running this file directly (python src/train.py)
-# This allows imports like `from src.models...` to resolve correctly.
-project_root = Path(__file__).resolve().parents[1]
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
+import numpy as np
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
-from transformers import AutoTokenizer, AutoImageProcessor
+from torch.utils.data import random_split
 from tqdm import tqdm
+
+from src.checkpoint import save_checkpoint
+from src.config import ModelConfig, tiny_config
+from src.data.dataset import MockMultimodalDataset
+from src.data.loading import build_loader, load_manifest
+from src.engine import evaluate, train_one_epoch
+from src.models.backbones import TINY_IMAGE_SIZE
 from src.models.multimodal_transformer import MultimodalDetector
-from src.data.dataset import MockMultimodalDataset, ManifestImageTextDataset
-from src.utils.adversarial import fgsm_on_features
 
 
-def collate_fn(batch, tokenizer, image_processor, max_audio_len=32000):
-    texts = [b["text"] for b in batch]
-    tok = tokenizer(texts, padding=True, truncation=True, max_length=256, return_tensors="pt")
-
-    # Pad/trim audio to fixed length for simplicity
-    audio_vals = [b["audio_values"][:max_audio_len] for b in batch]
-    audio_vals = [torch.nn.functional.pad(v, (0, max(0, max_audio_len - v.size(0)))) for v in audio_vals]
-    audio_values = torch.stack(audio_vals, dim=0)  # [B, T]
-
-    images = [b["image"] for b in batch]
-    img_inputs = image_processor(images=images, return_tensors="pt")
-    pixel_values = img_inputs["pixel_values"]  # [B, 3, 224, 224]
-
-    phishing = torch.tensor([b["phishing"] for b in batch], dtype=torch.long)
-    deepfake = torch.tensor([b["deepfake"] for b in batch], dtype=torch.long)
-
-    return {
-        "input_ids": tok["input_ids"],
-        "attention_mask": tok["attention_mask"],
-        "audio_values": audio_values,
-        "pixel_values": pixel_values,
-        "phishing": phishing,
-        "deepfake": deepfake,
-    }
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 
-def train(args):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    tokenizer = AutoTokenizer.from_pretrained(args.text_model)
-    image_processor = AutoImageProcessor.from_pretrained(args.vision_model)
-
-    if args.dataset_type == "manifest":
-        dataset = ManifestImageTextDataset(
-            manifest_path=args.manifest_path,
-            image_root=args.image_root,
-            image_size=224,
-            audio_len=args.audio_len,
-        )
-    else:
-        dataset = MockMultimodalDataset(length=args.dataset_size, image_size=224, audio_len=args.audio_len)
-    loader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=0,
-        collate_fn=lambda b: collate_fn(b, tokenizer, image_processor, max_audio_len=args.audio_len),
-    )
-
-    model = MultimodalDetector(
-        text_model_name=args.text_model,
-        audio_model_name=args.audio_model,
-        vision_model_name=args.vision_model,
+def build_config(args) -> ModelConfig:
+    if args.tiny:
+        return tiny_config()
+    return ModelConfig(
+        text_model=args.text_model,
+        audio_model=args.audio_model,
+        vision_model=args.vision_model,
         d_model=args.d_model,
         n_heads=args.n_heads,
         n_layers=args.n_layers,
         dropout=args.dropout,
-        freeze_backbones=args.freeze_backbones,
-    ).to(device)
+        max_audio_seconds=args.max_audio_seconds,
+    )
 
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    ce = nn.CrossEntropyLoss()
 
-    model.train()
-    for epoch in range(args.epochs):
-        pbar = tqdm(loader, desc=f"Epoch {epoch+1}/{args.epochs}")
-        for batch in pbar:
-            batch = {k: v.to(device) if torch.is_tensor(v) else v for k, v in batch.items()}
-            # Forward (clean)
-            out = model(batch)
-            loss_clean = ce(out["logits_phishing"], batch["phishing"]) + ce(out["logits_deepfake"], batch["deepfake"])
+def build_datasets(args, cfg):
+    if args.train_manifest:
+        train_set = load_manifest(args.train_manifest, cfg)
+    else:
+        print("No --train_manifest given: training on synthetic mock data (smoke test only).")
+        image_size = TINY_IMAGE_SIZE if cfg.tiny else 224
+        train_set = MockMultimodalDataset(
+            args.mock_size, image_size=image_size, audio_len=cfg.max_audio_len, sample_rate=cfg.sample_rate, seed=args.seed
+        )
+    if args.val_manifest:
+        return train_set, load_manifest(args.val_manifest, cfg)
+    n_val = int(len(train_set) * args.val_fraction)
+    if n_val == 0:
+        return train_set, None
+    generator = torch.Generator().manual_seed(args.seed)
+    return tuple(random_split(train_set, [len(train_set) - n_val, n_val], generator=generator))
 
-            # Prepare feature dict for adversarial attack
-            features = {
-                "text_feat": out["text_feat"],
-                "audio_feat": out["audio_feat"],
-                "vision_feat": out["vision_feat"],
-            }
-            # FGSM on features
-            adv_feats = fgsm_on_features(
-                model,
-                features,
-                targets={"phishing": batch["phishing"], "deepfake": batch["deepfake"]},
-                epsilon=args.adv_epsilon,
-            )
-            out_adv = model.forward_from_features(adv_feats)
-            loss_adv = ce(out_adv["logits_phishing"], batch["phishing"]) + ce(out_adv["logits_deepfake"], batch["deepfake"])
 
-            # TRADES-style combination
-            loss = args.alpha * loss_clean + (1.0 - args.alpha) * loss_adv
+def _fmt(value):
+    return "n/a" if value is None else f"{value:.4f}"
 
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
 
-            pbar.set_postfix({
-                "loss": f"{loss.item():.4f}",
-                "clean": f"{loss_clean.item():.4f}",
-                "adv": f"{loss_adv.item():.4f}",
-            })
+def main(argv=None):
+    args = parse_args(argv)
+    set_seed(args.seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Training finished.")
-    # Save checkpoint
-    os.makedirs("outputs", exist_ok=True)
-    ckpt_path = os.path.join("outputs", "model.pth")
-    torch.save(model.state_dict(), ckpt_path)
-    print(f"Saved checkpoint to {ckpt_path}")
+    cfg = build_config(args)
+    train_set, val_set = build_datasets(args, cfg)
+    generator = torch.Generator().manual_seed(args.seed)
+    train_loader = build_loader(train_set, cfg, args.batch_size, True, args.num_workers, generator)
+    val_loader = build_loader(val_set, cfg, args.batch_size, False, args.num_workers) if val_set else None
+    print(f"Device: {device} | train: {len(train_set)} | val: {len(val_set) if val_set else 0}")
+
+    model = MultimodalDetector(cfg).to(device)
+    if args.freeze_backbones:
+        model.freeze_backbones()
+    groups = [
+        {"params": model.backbone_parameters(), "lr": args.lr_backbone},
+        {"params": model.head_parameters(), "lr": args.lr_head},
+    ]
+    optimizer = torch.optim.AdamW([g for g in groups if g["params"]], weight_decay=args.weight_decay)
+
+    best_score, history = float("inf"), []
+    for epoch in range(1, args.epochs + 1):
+        progress = tqdm(train_loader, desc=f"Epoch {epoch}/{args.epochs}", leave=False)
+        train_loss = train_one_epoch(
+            model, progress, optimizer, device, args.adv_epsilon, args.adv_weight, args.grad_clip
+        )
+        record = {"epoch": epoch, "train_loss": train_loss}
+        score = train_loss
+        if val_loader:
+            record["val"] = evaluate(model, val_loader, device, args.threshold)
+            if record["val"]["loss"] is not None:
+                score = record["val"]["loss"]
+        history.append(record)
+
+        summary = f"epoch {epoch}: train_loss={train_loss:.4f}"
+        if "val" in record:
+            val = record["val"]
+            summary += f" val_loss={_fmt(val['loss'])}"
+            for task in ("phishing", "deepfake"):
+                summary += f" {task}_f1={_fmt(val[task]['f1'] if val[task] else None)}"
+        print(summary)
+
+        if score < best_score:
+            best_score = score
+            save_checkpoint(output_dir / "best.pt", model, epoch=epoch, metrics=record, threshold=args.threshold)
+            print(f"  saved {output_dir / 'best.pt'}")
+        (output_dir / "history.json").write_text(json.dumps(history, indent=2))
+
+    print(f"Done. Best checkpoint: {output_dir / 'best.pt'}")
+    return history
+
+
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description="Train the multimodal deepfake-phishing detector")
+    data = p.add_argument_group("data")
+    data.add_argument("--train_manifest", help="CSV manifest (see README). Omit to use synthetic mock data.")
+    data.add_argument("--val_manifest", help="Separate validation manifest; otherwise --val_fraction is split off")
+    data.add_argument("--val_fraction", type=float, default=0.2)
+    data.add_argument("--mock_size", type=int, default=128)
+    data.add_argument("--num_workers", type=int, default=0)
+
+    model = p.add_argument_group("model")
+    model.add_argument("--text_model", default="bert-base-uncased")
+    model.add_argument("--audio_model", default="facebook/wav2vec2-base")
+    model.add_argument("--vision_model", default="google/vit-base-patch16-224")
+    model.add_argument("--d_model", type=int, default=512)
+    model.add_argument("--n_heads", type=int, default=8)
+    model.add_argument("--n_layers", type=int, default=4)
+    model.add_argument("--dropout", type=float, default=0.1)
+    model.add_argument("--max_audio_seconds", type=float, default=4.0)
+    model.add_argument("--freeze_backbones", action="store_true", help="Train only the fusion and heads")
+    model.add_argument("--tiny", action="store_true", help="Tiny random backbones, no download (smoke tests)")
+
+    train = p.add_argument_group("training")
+    train.add_argument("--epochs", type=int, default=3)
+    train.add_argument("--batch_size", type=int, default=8)
+    train.add_argument("--lr_backbone", type=float, default=2e-5)
+    train.add_argument("--lr_head", type=float, default=2e-4)
+    train.add_argument("--weight_decay", type=float, default=1e-4)
+    train.add_argument("--grad_clip", type=float, default=1.0)
+    train.add_argument("--adv_epsilon", type=float, default=0.05, help="FGSM radius on modality features; 0 disables")
+    train.add_argument("--adv_weight", type=float, default=0.3, help="Weight of the adversarial loss term")
+    train.add_argument("--threshold", type=float, default=0.5)
+    train.add_argument("--seed", type=int, default=42)
+    train.add_argument("--output_dir", default="outputs/run")
+    return p.parse_args(argv)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--text_model", type=str, default="bert-base-uncased")
-    parser.add_argument("--audio_model", type=str, default="facebook/wav2vec2-base")
-    parser.add_argument("--vision_model", type=str, default="google/vit-base-patch16-224")
-    parser.add_argument("--dataset_size", type=int, default=512)
-    parser.add_argument("--audio_len", type=int, default=32000)
-    parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--epochs", type=int, default=2)
-    parser.add_argument("--lr", type=float, default=2e-4)
-    parser.add_argument("--weight_decay", type=float, default=1e-4)
-    parser.add_argument("--d_model", type=int, default=512)
-    parser.add_argument("--n_heads", type=int, default=8)
-    parser.add_argument("--n_layers", type=int, default=4)
-    parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--freeze_backbones", action="store_true")
-    parser.add_argument("--adv_epsilon", type=float, default=0.05)
-    parser.add_argument("--alpha", type=float, default=0.7, help="Weight for clean vs adversarial loss (TRADES)")
-    parser.add_argument("--dataset_type", type=str, default="mock", choices=["mock", "manifest"], help="Choose dataset implementation")
-    parser.add_argument("--manifest_path", type=str, default="data/test/manifest.txt", help="Path to image-text manifest file")
-    parser.add_argument("--image_root", type=str, default="data/test", help="Directory containing images referenced by the manifest")
-    args = parser.parse_args()
-    train(args)
+    main()
