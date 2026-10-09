@@ -95,6 +95,22 @@ python -m src.inference --text "URGENT: verify your password at http://192.168.4
 python -m src.visualize_results          # bar chart -> outputs/plots/predictions.png
 ```
 
+## Live demo (Cloudflare Pages)
+
+`web/index.html` is a static page: the phishing red-flag analyzer running in the browser (same
+rules as the Python module), plus the architecture and threat model. No build step. Two ways to
+put it on Cloudflare:
+
+1. **Dashboard, no tokens:** Cloudflare dashboard → Workers & Pages → Create → Pages → Connect
+   to Git → pick this repo → framework preset *None*, build command empty, output directory
+   `web`. Every push to `main` redeploys.
+2. **GitHub Actions:** add repository secrets `CLOUDFLARE_API_TOKEN` (permission *Cloudflare
+   Pages: Edit*) and `CLOUDFLARE_ACCOUNT_ID`. `.github/workflows/deploy-pages.yml` then deploys
+   to `deep-fake-detector.pages.dev` on every push to `main` that changes `web/`.
+
+The PyTorch model doesn't run on Cloudflare Pages (static hosting, no Python). To serve the
+model, run `src.inference` on a machine with Python, or wrap it in a small API on a GPU host.
+
 ## Project layout
 
 ```
@@ -107,8 +123,10 @@ src/
   utils/metrics.py       detection metrics
   engine.py              train / predict loops
   train.py evaluate.py robustness.py inference.py visualize_results.py   CLIs
+web/index.html           static demo page (Cloudflare Pages)
 tests/                   offline tests (tiny models)
-docs/THREAT_MODEL.md
+docs/THREAT_MODEL.md     attackers, threats, mitigations
+docs/REPORT.md           full project report
 ```
 
 ## Limitations
@@ -118,3 +136,10 @@ docs/THREAT_MODEL.md
 - One frame per video and one fixed clip length per audio; no temporal modelling.
 - Text attacks (paraphrasing, typo-squatting words) aren't in the robustness report yet;
   see the threat model for next steps.
+
+## Report
+
+The full write-up is in **[docs/REPORT.md](docs/REPORT.md)**: problem and real-world cases,
+threat model, architecture, adversarial training, robustness methodology (evasion rate), secure
+engineering, limitations, future work and references. Its results tables are ready to fill in
+once the model is trained on real data.

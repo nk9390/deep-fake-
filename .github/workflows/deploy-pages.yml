@@ -1,0 +1,37 @@
+name: Deploy demo to Cloudflare Pages
+
+# Publishes web/ to Cloudflare Pages on every push to main that touches it.
+# Needs two repository secrets (Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN   token with the "Cloudflare Pages: Edit" permission
+#   CLOUDFLARE_ACCOUNT_ID  your account ID (Cloudflare dashboard sidebar)
+# Without them the job skips instead of failing.
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/deploy-pages.yml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip when Cloudflare secrets are missing
+        if: env.CF_TOKEN == ''
+        run: echo "::notice::CLOUDFLARE_API_TOKEN not set; skipping deploy."
+      - uses: actions/setup-node@v4
+        if: env.CF_TOKEN != ''
+        with:
+          node-version: "20"
+      - name: Deploy web/ to Cloudflare Pages
+        if: env.CF_TOKEN != ''
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # Creating the project fails harmlessly once it exists.
+          npx --yes wrangler@3 pages project create deep-fake-detector --production-branch=main || true
+          npx --yes wrangler@3 pages deploy web --project-name=deep-fake-detector --branch=main
