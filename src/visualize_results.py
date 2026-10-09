@@ -1,55 +1,43 @@
-import pandas as pd
-import matplotlib.pyplot as plt
-import os
+import argparse
+from pathlib import Path
 
-def visualize_predictions(csv_path="outputs/predictions.csv", save_dir="outputs/plots"):
-    if not os.path.exists(csv_path):
-        print(f" CSV file not found: {csv_path}")
-        return
+import matplotlib
 
-    os.makedirs(save_dir, exist_ok=True)
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+
+def visualize_predictions(csv_path="outputs/predictions.csv", output="outputs/plots/predictions.png", threshold=0.5):
     df = pd.read_csv(csv_path)
     if df.empty:
-        print("⚠️ No data in predictions CSV.")
-        return
+        raise SystemExit(f"No predictions in {csv_path}")
 
-    print(f"✅ Loaded {len(df)} predictions.")
-    print(df.head())
+    x = np.arange(len(df))
+    width = 0.4
+    fig, ax = plt.subplots(figsize=(max(6, len(df) * 0.6), 5))
+    ax.bar(x - width / 2, df["phishing_prob"], width, label="phishing")
+    ax.bar(x + width / 2, df["deepfake_prob"], width, label="deepfake")
+    ax.axhline(threshold, color="gray", linestyle="--", linewidth=1, label=f"threshold {threshold}")
+    ax.set_xticks(x, df["id"], rotation=45, ha="right")
+    ax.set_ylim(0, 1)
+    ax.set_ylabel("probability")
+    ax.set_title("Detector scores per sample")
+    ax.legend()
+    fig.tight_layout()
 
-    # --- Phishing probabilities ---
-    plt.figure(figsize=(10, 6))
-    plt.bar(df["filename"], df["phishing_prob"]) 
-    plt.title("Phishing Probability per Image")
-    plt.xlabel("Image Filename")
-    plt.ylabel("Phishing Probability")
-    plt.xticks(rotation=45, ha="right")
-    plt.tight_layout()
-    phishing_plot = os.path.join(save_dir, "phishing_probs.png")
-    plt.savefig(phishing_plot)
-    plt.close()
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output)
+    plt.close(fig)
+    print(f"Saved plot to {output}")
+    return output
 
-    # --- Deepfake probabilities ---
-    plt.figure(figsize=(10, 6))
-    plt.bar(df["filename"], df["deepfake_prob"]) 
-    plt.title("Deepfake Probability per Image")
-    plt.xlabel("Image Filename")
-    plt.ylabel("Deepfake Probability")
-    plt.xticks(rotation=45, ha="right")
-    plt.tight_layout()
-    deepfake_plot = os.path.join(save_dir, "deepfake_probs.png")
-    plt.savefig(deepfake_plot)
-    plt.close()
-
-    print(f"📊 Saved plots in: {save_dir}")
-    print(f"   - {phishing_plot}")
-    print(f"   - {deepfake_plot}")
-
-    try:
-        # Try opening automatically on macOS
-        if os.name == "posix":
-            os.system(f"open {save_dir}")
-    except Exception as e:
-        print(f"⚠️ Could not open automatically: {e}")
 
 if __name__ == "__main__":
-    visualize_predictions()
+    p = argparse.ArgumentParser(description="Plot predictions written by src.inference")
+    p.add_argument("--csv", default="outputs/predictions.csv")
+    p.add_argument("--output", default="outputs/plots/predictions.png")
+    p.add_argument("--threshold", type=float, default=0.5)
+    args = p.parse_args()
+    visualize_predictions(args.csv, args.output, args.threshold)
