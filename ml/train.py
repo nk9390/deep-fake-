@@ -8,13 +8,13 @@ import torch
 from torch.utils.data import random_split
 from tqdm import tqdm
 
-from src.checkpoint import save_checkpoint
-from src.config import ModelConfig, tiny_config
-from src.data.dataset import MockMultimodalDataset
-from src.data.loading import build_loader, load_manifest
-from src.engine import evaluate, train_one_epoch
-from src.models.backbones import TINY_IMAGE_SIZE
-from src.models.multimodal_transformer import MultimodalDetector
+from ml.checkpoint import save_checkpoint
+from ml.config import ModelConfig, tiny_config
+from ml.data.dataset import MockMultimodalDataset
+from ml.data.loading import build_loader, load_manifest
+from ml.engine import evaluate, train_one_epoch
+from ml.models.backbones import TINY_IMAGE_SIZE
+from ml.models.multimodal_transformer import MultimodalDetector
 
 
 def set_seed(seed):

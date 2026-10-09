@@ -13,7 +13,7 @@ from transformers import (
     Wav2Vec2Config,
 )
 
-from src.config import ModelConfig
+from ml.config import ModelConfig
 
 MODALITIES = ("text", "audio", "vision")
 TINY_IMAGE_SIZE = 32

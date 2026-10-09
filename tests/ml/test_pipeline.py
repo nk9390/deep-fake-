@@ -1,8 +1,8 @@
 import csv
 import json
 
-from src import evaluate, inference, robustness, train
-from src.checkpoint import load_checkpoint
+from ml import evaluate, inference, robustness, train
+from ml.checkpoint import load_checkpoint
 
 
 def test_train_evaluate_robustness_inference(tmp_path, sample_dir):

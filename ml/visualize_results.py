@@ -35,7 +35,7 @@ def visualize_predictions(csv_path="outputs/predictions.csv", output="outputs/pl
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description="Plot predictions written by src.inference")
+    p = argparse.ArgumentParser(description="Plot predictions written by ml.inference")
     p.add_argument("--csv", default="outputs/predictions.csv")
     p.add_argument("--output", default="outputs/plots/predictions.png")
     p.add_argument("--threshold", type=float, default=0.5)

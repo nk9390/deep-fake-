@@ -2,8 +2,8 @@ from pathlib import Path
 
 import torch
 
-from src.config import ModelConfig
-from src.models.multimodal_transformer import MultimodalDetector
+from ml.config import ModelConfig
+from ml.models.multimodal_transformer import MultimodalDetector
 
 
 def save_checkpoint(path, model, **extra):

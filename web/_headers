@@ -1,0 +1,8 @@
+# Security headers for Cloudflare Pages. The script hash must match the inline <script> in
+# index.html; tests/test_web.py fails when they drift (it prints the new hash).
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'sha256-gy8b3y2yBRre3kcYX3Tf6h1RG/EALnYWIHvLtc8M8LM='; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Cross-Origin-Opener-Policy: same-origin

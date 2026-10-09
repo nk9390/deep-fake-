@@ -6,7 +6,24 @@ on:
   pull_request:
 
 jobs:
-  test:
+  cyber:
+    name: cyber tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+      - name: Fact-check function loads and classifies ratings
+        run: |
+          cp functions/api/factcheck.js "$RUNNER_TEMP/factcheck.mjs"
+          node -e "import(process.argv[1]).then(m => { if (m.classifyRating('Pants on Fire') !== 'false') process.exit(1); })" "$RUNNER_TEMP/factcheck.mjs"
+
+  ml:
+    name: ML extension (optional)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -15,9 +32,6 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install CPU PyTorch
-        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-      - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
-      - name: Run tests
-        run: pytest -q
+      - run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -r ml/requirements.txt -r requirements-dev.txt
+      - run: pytest -q tests/ml

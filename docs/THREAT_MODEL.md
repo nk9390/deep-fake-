@@ -2,48 +2,60 @@
 
 ## System
 
-The detector scores an inbound message (text, optional voice note, optional image/video
-frame) for **phishing** and **deepfake** content. Its output is meant to warn a user or route
-the message to an analyst, not to block it automatically.
+A toolkit that helps a person or a security analyst decide whether to trust a message:
+
+- **Command-line tools** (`cyber/`) that analyse message text, raw emails (`.eml`) and news claims.
+- **A public web app** (`web/`) on Cloudflare Pages that runs the phishing and fake news checks
+  in the browser.
+- **A server function** (`functions/api/factcheck.js`) that looks claims up in Google's Fact
+  Check Tools API with a secret API key.
+
+The output is advice ("these red flags fired"), not an automatic block.
 
 ## Assets
 
-- The people receiving messages: their credentials, money and trust.
-- The detector itself: its weights, its training data, and the host it runs on.
+| asset | why it matters |
+| --- | --- |
+| Users' credentials, money and trust | what the phisher is after |
+| The fact-check API key | lets anyone spend the project's Google quota; tied to the owner's Google account |
+| Visitors' browsers | the web app renders text from an external API |
+| Integrity of verdicts | a tool that wrongly says "safe" is worse than no tool |
 
 ## Adversaries
 
 | adversary | goal | capability |
 | --- | --- | --- |
-| Phisher using a voice clone / face swap (CEO fraud, "family emergency" scams) | get a malicious message past the detector | crafts all inputs; can query the detector if it's exposed |
-| Adaptive attacker with model access (leaked weights, open-source model) | evasion with minimal perturbation | white-box gradients |
-| Data poisoner | plant a backdoor or bias | contributes training samples (scraped or crowdsourced data) |
-| Malicious artifact supplier | code execution on the host | ships a model checkpoint or a crafted media file |
+| Phisher | get a scam message or spoofed email believed | writes the whole message, registers domains, sends email from servers they control |
+| Misinformation spreader | make a false claim look credible | writes headlines, reposts satire as news |
+| Quota abuser | burn the API key's quota or steal the key | calls the public endpoint, reads page source |
+| Malicious data source | run script in visitors' browsers | controls text that appears in API results (a claim, a publisher name, a URL) |
 
 ## Threats and mitigations
 
-| # | threat | where | mitigation in this repo | status |
-| --- | --- | --- | --- | --- |
-| T1 | **Evasion**: imperceptible noise added to a deepfake image/audio so it scores authentic | inference | FGSM adversarial training; `src.robustness` measures evasion rate on pixels/audio/embeddings | partial: feature-space training only |
-| T2 | **Text evasion**: paraphrase, homoglyphs, zero-width chars, typos | inference | rule-based red flags flag homograph (punycode) URLs independently of the model | open: no text attacks in the report yet |
-| T3 | **Modality dropping**: send only the modality the model is weakest on | inference | missing modalities are masked, not zero-filled, so each modality must stand alone; train with mixed rows | partial |
-| T4 | **Malicious checkpoint**: a `.pt` is a pickle; loading an untrusted one runs code | load | `torch.load(..., weights_only=True)` | mitigated |
-| T5 | **Resource exhaustion**: huge text, very long audio, decompression-bomb images | load | text capped at 20k chars; audio reads only the first `max_audio_seconds`; PIL rejects decompression bombs | mitigated |
-| T6 | **Silent failure**: missing or corrupt files scored as if they were real | load | missing files and invalid labels raise at load time (the old code substituted random images) | mitigated |
-| T7 | **Data poisoning / backdoors** | training | none yet | open: dedupe and audit sources, track provenance, spectral-signature checks |
-| T8 | **Model extraction / oracle abuse**: probing an exposed API to tune attacks | deployment | none: don't expose raw probabilities publicly; rate-limit | open |
-| T9 | **Distribution shift**: new deepfake generators the model never saw | deployment | none | open: evaluate per generator, retrain regularly |
+| # | threat | mitigation | status |
+| --- | --- | --- | --- |
+| T1 | **Rule evasion**: rephrase so no keyword matches, use a fresh domain with HTTPS and no IP address | several independent signals (links, headers, wording); fact-checks don't depend on wording; the optional ML model learns patterns rules miss | partial |
+| T2 | **Email spoofing**: fake From address or display name | SPF / DKIM / DMARC results, Reply-To and Return-Path mismatches, display-name spoofing check | detected |
+| T3 | **Lying links**: visible text says paypal.com, real target is elsewhere | `link_text_mismatch` compares the text's domain with the real destination | detected |
+| T4 | **Homograph domains**: Cyrillic "а" in pаypal.com | `punycode_domain` (the browser version also converts Unicode hosts to `xn--` first) | detected |
+| T5 | **API key theft** | key stored as an encrypted Cloudflare secret, used only in the server function, never sent to the browser or logged; upstream errors aren't forwarded because the request URL contains the key | mitigated |
+| T6 | **Cross-site scripting through API data** | every API string is HTML-escaped before display; only `http(s)` links are rendered (a `javascript:` URL is dropped server-side and client-side); links use `rel="noopener noreferrer"`; a strict Content-Security-Policy (`web/_headers`) only allows the page's own script by its SHA-256 hash, so injected script can't run even if escaping failed | mitigated |
+| T7 | **Quota abuse / denial of service** on `/api/factcheck` | 300-character query cap; identical queries cached at Cloudflare's edge for an hour | partial: add Cloudflare rate limiting |
+| T8 | **Server-side request forgery** through the proxy | the function only calls one fixed Google URL; user input goes only into query parameters | mitigated |
+| T9 | **Resource exhaustion** with huge inputs | emails over 5 MB are refused; claims are truncated | mitigated |
+| T10 | **False reassurance**: "no red flags" or "no fact-checks found" read as "safe" | the UI and CLI say explicitly that no match doesn't mean true or safe | mitigated (by wording) |
+| T11 | **Stale knowledge**: brand-new rumours have no fact-check yet | none possible in the tool; advise checking the original source | accepted |
+| T12 | **Privacy**: claims typed into the web app are sent to Google | only the fact-check button sends anything; the red-flag checks run locally in the browser | accepted, documented on the page |
 
-## Metrics that matter
+## Optional ML extension
 
-For a detector, a **false negative is an attack that got through**, so `src.evaluate` reports
-the false-negative rate next to accuracy and F1, and `src.robustness` reports the **evasion
-rate**: of the malicious samples caught on clean input, the fraction an attacker can flip to
-"benign" within a perturbation budget ε.
+The deepfake model in `ml/` adds its own threats: adversarial evasion (invisible noise on a
+deepfake image or voice), malicious model checkpoints (a `.pt` file is a pickle), and training
+data poisoning. It loads checkpoints with `torch.load(weights_only=True)`, validates and caps
+its inputs, and `ml.robustness` measures the evasion rate. See [ml/README.md](../ml/README.md).
 
 ## Next steps
 
-1. Text attacks with [TextAttack](https://github.com/QData/TextAttack) (synonym swap, homoglyphs).
-2. Input-space adversarial training (PGD on pixels/audio), not just embeddings.
-3. Per-generator evaluation (hold out one deepfake method entirely).
-4. Calibrate the threshold for a target false-negative rate instead of a fixed 0.5.
+1. Cloudflare rate limiting rule on `/api/*` (T7).
+2. Unicode confusable normalisation before keyword matching (T1).
+3. Domain-age and reputation lookups for links (T1), e.g. via a WHOIS or threat-intel API.

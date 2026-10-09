@@ -9,7 +9,7 @@ name: Deploy demo to Cloudflare Pages
 on:
   push:
     branches: [main]
-    paths: ["web/**", ".github/workflows/deploy-pages.yml"]
+    paths: ["web/**", "functions/**", ".github/workflows/deploy-pages.yml"]
   workflow_dispatch:
 
 jobs:

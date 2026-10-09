@@ -1,7 +1,7 @@
 import torch
 from PIL import Image
 
-from src.utils.losses import TASKS
+from ml.utils.losses import TASKS
 
 
 class MultimodalCollator:

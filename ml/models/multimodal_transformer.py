@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from src.config import ModelConfig
-from src.models.backbones import MODALITIES, build_encoders, config_from_json, config_to_json
+from ml.config import ModelConfig
+from ml.models.backbones import MODALITIES, build_encoders, config_from_json, config_to_json
 
 
 class MultimodalDetector(nn.Module):
