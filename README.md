@@ -143,3 +143,9 @@ The full write-up is in **[docs/REPORT.md](docs/REPORT.md)**: problem and real-w
 threat model, architecture, adversarial training, robustness methodology (evasion rate), secure
 engineering, limitations, future work and references. Its results tables are ready to fill in
 once the model is trained on real data.
+
+## Credits
+
+Project concept, original prototype and test data by Karthikey Nori ([@nk9390](https://github.com/nk9390)).
+The current implementation (multimodal model, adversarial robustness tooling, threat model,
+tests and web demo) was developed with the help of Claude Code, an AI coding assistant.
