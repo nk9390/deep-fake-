@@ -1,0 +1,20 @@
+Return-Path: <bounce@mailer-x7.ru>
+Authentication-Results: mx.example.edu; spf=fail smtp.mailfrom=mailer-x7.ru; dkim=none; dmarc=fail header.from=paypal.com
+From: "service@paypal.com" <security-alert@paypa1-support.com>
+Reply-To: billing@secure-refunds.top
+To: student@example.edu
+Subject: URGENT: your account has been suspended
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset=utf-8
+
+Your account has been locked. Verify your account within 24 hours at http://192.168.4.1/login or it will be suspended.
+
+--b1
+Content-Type: text/html; charset=utf-8
+
+<p>Your account has been locked. <a href="http://192.168.4.1/login">https://www.paypal.com/signin</a> within 24 hours or it will be suspended.</p>
+
+--b1--

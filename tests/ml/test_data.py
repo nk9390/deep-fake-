@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from src.data.dataset import ManifestDataset, MockMultimodalDataset
-from src.data.loading import build_loader, load_manifest
+from ml.data.dataset import ManifestDataset, MockMultimodalDataset
+from ml.data.loading import build_loader, load_manifest
 
 
 def test_manifest_parsing(sample_dir, cfg):

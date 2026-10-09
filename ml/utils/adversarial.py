@@ -4,7 +4,7 @@ how easily an attacker can push a malicious sample past the detector.
 """
 import torch
 
-from src.utils.losses import multitask_loss
+from ml.utils.losses import multitask_loss
 
 
 def pgd(loss_fn, inputs: dict, epsilon, steps=1, step_size=None, random_start=False):

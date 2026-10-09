@@ -1,9 +1,12 @@
 ## Project
 
-Multimodal (text/audio/image) deepfake-phishing detector, framed as a cyber security project
-(threat model in docs/THREAT_MODEL.md). Entry points are `python -m src.<train|evaluate|robustness|inference>`.
-Run `pytest -q` before pushing; tests use tiny offline models (`tiny_config()`), never downloads.
-Keep `torch.load(..., weights_only=True)` and the input validation in `src/data/dataset.py`.
+Cyber security toolkit (student project): phishing red flags, email header forensics, fake news
+checks with Google's Fact Check API. Core is stdlib-only Python in `cyber/` (`python -m cyber
+message|email|news`); web app in `web/` with a Cloudflare Pages Function in `functions/`.
+`ml/` is an optional PyTorch deepfake extension; keep the cyber tools independent of it.
+The JS rules in `web/index.html` mirror `cyber/phishing.py` and `cyber/news.py`: change both.
+Run `pytest -q` before pushing (ML tests only run when torch is installed).
+Never put API keys in `web/` or the repo: the fact-check key is a Cloudflare secret.
 
 ## gstack (recommended)
 

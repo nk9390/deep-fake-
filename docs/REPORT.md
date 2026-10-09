@@ -1,259 +1,258 @@
-# Project Report: Adversarially Robust Detection of Deepfake-Based Phishing
+# Project Report: A Toolkit for Detecting Phishing, Email Spoofing and Fake News
 
 **Repository:** https://github.com/nk9390/deep-fake-
-**Live demo:** the `web/` page (red-flag analyzer, architecture, threat model), deployable to Cloudflare Pages
 
 ---
 
 ## Abstract
 
-Phishing used to be judged by its text. Generative AI lets an attacker attach a cloned voice
-note or a face-swapped video of a person the victim trusts, which defeats the "does this sound
-like my boss?" check people rely on. This project builds a multimodal detector that scores a
-message's text, audio and image together for two things: whether it is a social-engineering
-attempt (**phishing**) and whether its media is synthetic (**deepfake**). Because a detector is
-itself an attack target, the project treats it as a security system: it defines a threat model,
-trains with adversarial examples, measures how easily an attacker can evade it (the **evasion
-rate**), explains its phishing verdicts with rule-based red flags, and hardens the pipeline
-against malicious inputs and model files. The full pipeline (data loading, training,
-evaluation, robustness testing, inference, a web demo) is implemented and covered by automated
-tests. Detection quality on real attacks still depends on training with real labelled datasets,
-which is the main next step.
+Most successful cyber attacks start with a person being tricked, not a system being broken.
+Phishing emails, spoofed senders and viral false stories all exploit trust, and generative AI
+makes them cheaper to produce and more convincing. This project builds a toolkit that helps a
+person or a security analyst decide whether to trust a message. It has three detectors:
+**phishing red flags** in text and links, **email header forensics** (SPF, DKIM, DMARC, header
+mismatches, display-name spoofing, links whose text lies about their destination), and a
+**fake news check** that combines writing red flags with verdicts published by professional
+fact-checkers. The tools run from the command line with no dependencies beyond Python, and as
+a web app on Cloudflare Pages whose design treats the app itself as an attack target: the API
+key never reaches the browser, external data can't inject script, and a strict
+Content-Security-Policy backs that up. The project includes a threat model, 19 automated tests,
+continuous integration, and an optional machine-learning extension for deepfake voices and
+images.
 
 ## 1. Introduction
 
 ### 1.1 Problem
 
-Deepfake-enabled fraud is no longer hypothetical:
-
-- **2019:** criminals used an AI-cloned voice of a parent company's chief executive to get the
-  head of a UK energy firm to wire €220,000.
-- **2024:** an employee of the engineering firm Arup in Hong Kong transferred about US$25 million
-  after a video call in which the "CFO" and other colleagues were all deepfakes.
-
-Both attacks pair a classic business-email-compromise request (urgent, authoritative, a
-payment) with synthetic media that makes the request believable. Text-only phishing filters
-can't see the media, and deepfake detectors don't read the request. This project combines the two.
+- **Phishing** is the most common initial step of breaches. Typical tricks: links to raw IP
+  addresses or look-alike domains, urgent requests for passwords or payments, and messages
+  that impersonate a boss, a bank or IT support.
+- **Email spoofing** lets an attacker put any address in the `From:` line. The protocols that
+  stop it (SPF, DKIM, DMARC) record their verdicts in headers that ordinary users never see.
+- **Fake news** spreads faster than corrections. Professional fact-checkers publish verdicts,
+  but readers rarely look them up.
+- **Deepfakes** raise the stakes: in 2024 an employee of the engineering firm Arup in Hong Kong
+  transferred about US$25 million after a video call in which the "CFO" was a deepfake, and in
+  2019 a cloned CEO voice convinced a UK energy firm to wire €220,000. Both started as a
+  classic social-engineering request.
 
 ### 1.2 Objectives
 
-1. Detect phishing and deepfake content from any combination of text, audio and image.
-2. Treat the detector as an attack surface: model the attacker, and measure robustness to
-   evasion instead of reporting clean accuracy only.
-3. Give an analyst an explanation, not only a score.
-4. Engineer the pipeline securely: untrusted files must not be able to execute code, exhaust
-   resources, or silently corrupt results.
+1. Detect the common technical and linguistic signs of phishing in messages and links.
+2. Expose email spoofing by reading the authentication headers users don't see.
+3. Check news claims against published fact-checks, not just writing style.
+4. Explain every verdict, so the user learns what to look for.
+5. Build the web app securely, treating it as an attack surface.
 
 ## 2. Threat model (summary)
 
 The full model is in [THREAT_MODEL.md](THREAT_MODEL.md).
 
-| adversary | goal | capability |
-| --- | --- | --- |
-| Phisher with voice clone / face swap | get a malicious message past the detector | controls every input |
-| Adaptive attacker with model access | evasion with minimal perturbation | white-box gradients |
-| Data poisoner | backdoor or bias the model | contributes training samples |
-| Malicious artifact supplier | code execution on the host | supplies a checkpoint or media file |
+| adversary | goal |
+| --- | --- |
+| Phisher | get a scam message or spoofed email believed |
+| Misinformation spreader | make a false claim look credible |
+| Quota abuser | steal the API key or burn its quota |
+| Malicious data source | run script in visitors' browsers through API results |
 
-Key threats: evasion through small input perturbations (T1), text evasion (T2), dropping the
-modality the model handles worst (T3), malicious checkpoints (T4), resource exhaustion (T5),
-silent failures (T6), data poisoning (T7), oracle abuse (T8), and new deepfake generators the
-model has never seen (T9).
+Twelve threats are analysed, from rule evasion and spoofing (what the tools detect) to API key
+theft, cross-site scripting, request forgery and denial of service (attacks on the tool itself).
+A key design principle follows: a **false negative is an attack that got through**, so the
+evaluation reports the false-negative rate, and the tools never say "safe", only which red flags
+fired.
 
-The design choice that follows from this: a **false negative is an attack that got through**,
-so the project reports false-negative rate and evasion rate alongside accuracy.
+## 3. Design
 
-## 3. System design
+### 3.1 Phishing red flags (`cyber/phishing.py`)
 
-### 3.1 Architecture
+Every link in the text is extracted and its host parsed. Then two families of checks run:
+
+| indicator | technique it catches |
+| --- | --- |
+| `ip_address_url` | link to a raw IP address instead of a domain, hiding who runs the server |
+| `punycode_domain` | internationalised `xn--` domains used for homograph look-alikes (pаypal with a Cyrillic а) |
+| `credentials_in_url` | `https://bank.com@evil.example/`: the browser ignores everything before `@` |
+| `url_shortener` | hidden destination |
+| `suspicious_tld` | top-level domains common in abuse reports (`.zip`, `.top`, `.xyz`, ...) |
+| `unencrypted_link` | plain `http://` |
+| `urgency` | pressure to act before thinking |
+| `credential_request` | asks for a password, one-time code or identity number |
+| `payment_request` | gift cards, wire transfers, crypto, bank details |
+| `authority_impersonation` | claims to be a CEO, IT, a bank or a government agency |
+
+Keyword groups use word-boundary matching (so "ceo" doesn't match inside other words) and accept
+plurals. The score is the number of distinct indicators divided by four, capped at 1.
+
+### 3.2 Email forensics (`cyber/email_headers.py`)
+
+The `.eml` file is parsed with Python's standard `email` package and these checks run:
+
+| check | how |
+| --- | --- |
+| SPF, DKIM, DMARC | read the receiving server's `Authentication-Results` header; `fail`, `softfail`, `none` and error results are flagged |
+| Reply-To mismatch | replies would go to a different domain than the sender's |
+| Return-Path mismatch | bounces go elsewhere (common for newsletters, so reported as a weaker signal) |
+| Display-name spoofing | the display name contains an email address that isn't the real sender, e.g. `"service@paypal.com" <alert@paypa1-support.com>` |
+| Lying links | in the HTML part, a link whose visible text is a URL for one site but whose `href` goes to another |
+
+Domains are compared on their last two labels, so `mail.paypal.com` and `paypal.com` count as
+the same site. The subject and body also go through the phishing red flags. Emails over 5 MB are
+refused before parsing.
+
+### 3.3 Fake news check (`cyber/news.py`, `cyber/factcheck.py`)
+
+**Writing red flags**: sensational or conspiracy wording, pressure to share before checking,
+a high share of ALL-CAPS words, repeated exclamation marks, long text with no attribution
+("according to", "said", "study"...), and links to known satire sites.
+
+These only catch badly written misinformation: a calm, false story passes them. So the claim is
+also looked up in **Google's Fact Check Tools API**, which aggregates ClaimReview verdicts
+published by fact-checking organisations such as PolitiFact, Snopes, Reuters, AFP and Full
+Fact. Each publisher's free-text rating ("Pants on Fire", "Mostly True", "Missing context") is
+mapped to *false*, *true* or *mixed*, checking for mixed wording first so "Half true" isn't
+counted as true. The result shows the count per verdict and links to each fact-check.
+
+Two caveats are shown to the user: matches are fact-checks of *similar* claims, and no match
+doesn't mean a claim is true, since new rumours haven't been checked yet.
+
+### 3.4 Web app and its security (`web/`, `functions/`)
 
 ```
-text  ──BERT──────┐
-audio ──Wav2Vec2──┼─► one token each ─► [CLS] + fusion transformer ─► phishing head (0/1)
-image ──ViT───────┘   (+ modality embedding)                        └► deepfake head (0/1)
+browser ──(claim)──► /api/factcheck  ── Cloudflare Pages Function ──► Google Fact Check API
+   ▲                      │  holds FACTCHECK_API_KEY as an encrypted secret
+   └── escaped JSON ◄─────┘  returns only cleaned fields, never the upstream URL or body
 ```
 
-- **Encoders.** BERT (`bert-base-uncased`) for text, Wav2Vec 2.0 (`facebook/wav2vec2-base`) for
-  16 kHz audio, and ViT (`google/vit-base-patch16-224`) for images or video frames. Each is
-  reduced to one vector: the [CLS] state for text and images, and for audio a mean over only the
-  frames that came from real samples, not padding.
-- **Fusion.** The three vectors are projected to a shared 512-dimensional space, tagged with a
-  learned modality embedding, and passed with a learned [CLS] token through a 4-layer
-  pre-norm transformer encoder. Two linear heads read the [CLS] output.
-- **Missing modalities.** Real messages rarely carry all three (an email has no audio). Absent
-  modalities are excluded through the attention padding mask, so their placeholder inputs
-  cannot influence the output. A unit test perturbs the placeholders and checks that the
-  prediction doesn't change. This also matters for threat T3: the model can't be made to rely on
-  an all-zeros "absent" pattern.
-- **Partial labels.** Each task's label may be unknown (`-1`) and is then left out of the loss,
-  so datasets that only label deepfakes (FaceForensics++) or only label phishing (email corpora)
-  can be mixed in one training set.
+The phishing and news red flags run entirely in the browser (a JavaScript port of the Python
+rules), so nothing is sent anywhere until the user clicks *Check fact-checkers*. Security
+controls:
 
-### 3.2 Training
-
-- Loss: the sum of the two tasks' cross-entropy over labelled samples.
-- Optimiser: AdamW with separate learning rates for the pretrained backbones (2e-5) and the new
-  fusion layers and heads (2e-4), gradient clipping at 1.0, and an optional fully frozen-backbone
-  mode for small GPUs.
-- Model selection: the checkpoint with the lowest validation loss is saved together with its
-  full configuration and backbone configs, so it can be rebuilt offline.
-
-### 3.3 Adversarial training
-
-During training each batch is also attacked with the Fast Gradient Sign Method (FGSM;
-Goodfellow et al., 2015) in the space of the modality embeddings:
-
-    δ = ε · sign(∇_f L(f, y)),   L_total = (1 − w) · L(f, y) + w · L(f + δ, y)
-
-with ε = 0.05 and w = 0.3 by default. The perturbation is computed on a detached copy, but added
-to the live features, so the adversarial term also trains the encoders and not only the fusion
-layers.
-
-### 3.4 Explainable red flags
-
-`src/utils/phishing_indicators.py` applies transparent rules to the text and reports which ones
-fired:
-
-| indicator | why it matters |
+| control | threat |
 | --- | --- |
-| `ip_address_url` | link to a raw IP hides who runs the server |
-| `punycode_domain` | `xn--` domains enable look-alikes (pаypal with a Cyrillic а) |
-| `credentials_in_url` | `https://bank.com@evil.example/` actually goes to evil.example |
-| `url_shortener`, `suspicious_tld`, `unencrypted_link` | hidden or low-trust destinations |
-| `urgency`, `credential_request`, `payment_request`, `authority_impersonation` | the social-engineering pattern of the request |
+| API key only in the server function, stored as a Cloudflare secret | key theft (T5) |
+| Upstream errors replaced by generic messages, because the upstream URL contains the key | key leakage through errors (T5) |
+| Server keeps only expected fields, truncates strings, drops non-`http(s)` URLs | malicious API data (T6) |
+| Client HTML-escapes every string and re-checks link schemes; `rel="noopener noreferrer"` | cross-site scripting (T6), tab-nabbing |
+| `Content-Security-Policy` allows only the page's own script by SHA-256 hash, no other script, no framing, no form posting | defence in depth against XSS and clickjacking |
+| `X-Content-Type-Options`, `Referrer-Policy: no-referrer`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` | content sniffing, referrer leaks, unwanted device access |
+| Function calls one fixed upstream URL; input only in query parameters | server-side request forgery (T8) |
+| 300-character query limit; identical queries cached at the edge for an hour | quota abuse (T7) |
 
-These rules don't feed the model. They give the analyst a reason to trust or doubt a score, and
-they're a baseline the learned model should beat. The same rules run in the browser on the demo
-page; a check during development confirmed the JavaScript and Python versions give identical
-results on the sample messages.
+Tests keep the security properties from silently breaking: one fails if the inline script
+changes without its CSP hash being updated, one fails if anything that looks like a Google API
+key is committed to `web/`, and one checks that the JavaScript keyword lists match the Python
+ones.
 
-## 4. Robustness evaluation methodology
-
-`src/robustness.py` attacks a trained checkpoint with Projected Gradient Descent (PGD; Madry et
-al., 2018), which is FGSM when `--steps 1`, in four places:
-
-| `--space` | what is perturbed | realism |
-| --- | --- | --- |
-| `vision` | normalised image pixels | realistic: noise added to a deepfake frame |
-| `audio` | raw audio samples | realistic: noise added to a cloned voice |
-| `input` | pixels and audio together | realistic, strongest input attack |
-| `feature` | the modality embeddings | white-box upper bound, not physically realisable |
-
-For each budget ε it reports, per task:
-
-- **clean accuracy** and **adversarial accuracy**, and
-- **evasion rate**: of the malicious samples (label 1) that the detector catches on clean input,
-  the fraction the attack flips to "benign". This is the number an attacker cares about.
-
-Plotting evasion rate against ε shows how much perturbation it takes to defeat the detector. A
-robust model needs a large ε, which means visible artefacts.
-
-## 5. Secure engineering
-
-| risk | control |
-| --- | --- |
-| A `.pt` checkpoint is a Python pickle; loading an untrusted one can execute code | `torch.load(..., weights_only=True)` only accepts tensors and plain containers; the checkpoint stores configs as JSON strings so this works |
-| Oversized inputs exhaust memory | text capped at 20,000 characters; audio reads at most `max_audio_seconds` from the file instead of decoding all of it; PIL's decompression-bomb check on images |
-| Missing or corrupt files scored as real ones | the original prototype replaced unreadable images with random noise and still output a prediction; now missing files, unknown columns and invalid labels stop with an error naming the row |
-| CSV injection or broken output | results are written with Python's `csv` module, which quotes fields correctly |
-| Regressions | 16 automated tests run offline on tiny randomly initialised models and run in GitHub Actions on every push |
-
-## 6. Implementation
+## 4. Implementation
 
 | component | file |
 | --- | --- |
-| model config, saved into every checkpoint | `src/config.py` |
-| encoders and fusion model | `src/models/` |
-| CSV manifest and mock datasets, batching | `src/data/` |
-| FGSM / PGD attacks | `src/utils/adversarial.py` |
-| red flags | `src/utils/phishing_indicators.py` |
-| metrics (accuracy, precision, recall, F1, AUC, false-negative rate) | `src/utils/metrics.py` |
-| command-line tools | `src/train.py`, `evaluate.py`, `robustness.py`, `inference.py`, `visualize_results.py` |
-| web demo | `web/index.html` |
-| tests and CI | `tests/`, `.github/workflows/ci.yml` |
+| phishing red flags | `cyber/phishing.py` |
+| email forensics | `cyber/email_headers.py` |
+| fake news red flags | `cyber/news.py` |
+| fact-check client | `cyber/factcheck.py` |
+| evaluation (precision, recall, F1, false-negative rate) | `cyber/evaluate.py` |
+| command line (`python -m cyber message / email / news / evaluate`) | `cyber/__main__.py` |
+| web app and security headers | `web/index.html`, `web/_headers` |
+| fact-check proxy | `functions/api/factcheck.js` |
+| example emails and messages | `samples/` |
+| tests | `tests/` |
+| optional deepfake ML extension | `ml/` |
 
-**Verification so far.** The test suite covers manifest parsing and validation, audio
-resampling, missing-modality masking, attack budgets (perturbations stay within ε and raise the
-loss), checkpoint round-trips, and the train → evaluate → robustness → inference pipeline end to
-end. All tests pass in CI.
+Everything in `cyber/` uses only the Python standard library, so it runs on any machine with
+Python 3, including lab machines where installing packages isn't allowed.
 
-## 7. Results
+## 5. Testing and evaluation
 
-The pipeline has so far been trained only on the synthetic mock dataset, which exists to test
-the code. Numbers from it say nothing about real attacks, so none are reported here. To produce
-real results:
+### 5.1 Automated tests
 
-1. Build manifests from public datasets: FaceForensics++ or Celeb-DF (face deepfakes),
-   ASVspoof 2019 LA (voice deepfakes), a phishing corpus such as Nazario plus Enron for
-   benign mail. Keep a held-out test split, ideally with one deepfake generator held out
-   entirely (threat T9).
-2. Train: `python -m src.train --train_manifest data/train.csv --val_manifest data/val.csv`
-   (a free Colab GPU is enough with `--freeze_backbones`).
-3. Fill in the tables below with `src.evaluate` and `src.robustness`.
+19 tests run on every push in GitHub Actions. They cover each phishing indicator, the spoofed
+and legitimate sample emails, the lying-link check (including links to raw IP addresses), the
+5 MB email limit, rating classification (including "Half true" → mixed), removal of
+`javascript:` links from API data, the command line, and the web security checks above. The fact-check
+server function was also tested with a mocked API: correct results, clear errors for a missing
+query or key, and no key in the error response when Google rejects the request.
 
-**Table 1. Clean detection (test split)**
+### 5.2 Sample results
 
-| task | accuracy | precision | recall | F1 | AUC | false-negative rate |
+`samples/phishing.eml` is a spoofed "PayPal" email. The toolkit flags all seven header problems
+(SPF, DKIM and DMARC failures, Reply-To and Return-Path mismatches, a display name pretending to
+be `service@paypal.com`, and a link that shows `https://www.paypal.com/signin` but goes to
+`http://192.168.4.1/login`) plus four content red flags. `samples/legit.eml`, a real-looking
+university notice with passing authentication, gets no flags.
+
+On `samples/messages.csv`, ten hand-written messages (five phishing, five legitimate), the
+phishing detector at threshold 0.5 scores:
+
+| accuracy | precision | recall | F1 | false-negative rate |
+| --- | --- | --- | --- | --- |
+| 0.90 | 1.00 | 0.80 | 0.89 | 0.20 |
+
+The one miss is instructive: *"Hey, it's me. Can you lend me some money? I'll explain later."*
+It has no link, no keyword and no urgency word, which is exactly the low-tech scam that rules
+can't see. This set was written to demonstrate the tool, not to benchmark it, so these numbers
+don't predict real-world performance.
+
+### 5.3 How to evaluate on real data
+
+`python -m cyber evaluate data.csv --detector phishing` reads any CSV with `text,label` columns.
+Public sources: the Nazario phishing corpus and Enron (legitimate) emails, or the Kaggle
+"Phishing Email Dataset"; for news, the LIAR dataset (PolitiFact statements with labels).
+
+| dataset | detector | accuracy | precision | recall | F1 | FNR |
 | --- | --- | --- | --- | --- | --- | --- |
-| phishing | | | | | | |
-| deepfake | | | | | | |
-| red-flag baseline (phishing, score ≥ 0.5) | | | | | — | |
+| Nazario + Enron sample | phishing | | | | | |
+| LIAR test split | news red flags | | | | | |
 
-**Table 2. Evasion rate under PGD-10**
+## 6. Limitations
 
-| ε | vision (deepfake) | audio (deepfake) | feature (phishing) |
-| --- | --- | --- | --- |
-| 0.01 | | | |
-| 0.03 | | | |
-| 0.10 | | | |
+- **Rules can be evaded.** A careful attacker avoids keywords, uses a fresh domain with HTTPS,
+  and sends from a domain whose SPF/DKIM/DMARC they control. The tools catch common and careless
+  attacks, not targeted ones.
+- **Header checks trust the receiving server.** `Authentication-Results` is written by the
+  user's mail provider; a forged header added by the sender before that point could mislead a
+  naive parser. The tool reads all such headers, but a production version should only trust
+  the one added by the user's own provider.
+- **English only.** Keyword lists are in English.
+- **Fact-checks lag behind rumours**, and match similar claims, not identical ones.
+- **No rate limiting yet** on the public fact-check endpoint beyond caching.
 
-**Table 3. Ablation**: the same Table 2 for a model trained with `--adv_epsilon 0`, to measure
-what adversarial training buys.
+## 7. Optional ML extension
 
-## 8. Limitations
+`ml/` contains a multimodal model (BERT for text, Wav2Vec2 for audio, ViT for images, fused by a
+transformer) for detecting deepfake voices and images, with adversarial training and an
+**evasion-rate** test that measures how often invisible noise flips a caught deepfake to "real".
+It applies the same security mindset: model files load with `torch.load(weights_only=True)`,
+since a `.pt` file is a pickle that could run code. It isn't needed for the toolkit and isn't
+trained on real data yet; see [ml/README.md](../ml/README.md).
 
-- No real-data results yet (see section 7).
-- Adversarial training happens in embedding space only; input-space PGD training is stronger but
-  several times slower.
-- Text attacks (synonym swaps, homoglyph substitution, zero-width characters) aren't in the
-  robustness report yet.
-- One frame per video and a fixed audio window: no temporal modelling, so lip-sync and
-  voice-to-face mismatches aren't exploited.
-- The red-flag rules are English-only and keyword-based, so a careful attacker can avoid them.
-- No public dataset has text, audio and image aligned for the same attack, so multimodal fusion
-  is trained on mixed single-modality rows plus whatever paired samples are collected.
+## 8. Future work
 
-## 9. Future work
+1. Cloudflare rate limiting on `/api/*`.
+2. Only trust the `Authentication-Results` header added by the user's own mail provider.
+3. Unicode confusable normalisation before keyword matching (catches "pаssword" with a Cyrillic а).
+4. Domain age and reputation lookups (newly registered domains are a strong phishing signal).
+5. Evaluate on the public datasets in section 5.3 and tune the threshold for a target
+   false-negative rate.
+6. Email header analysis in the web app, by pasting raw headers.
 
-1. Train on the datasets above and complete Tables 1–3.
-2. Text attacks with TextAttack, and Unicode normalisation (NFKC, confusable mapping) before the
-   text encoder as a defence.
-3. Input-space PGD adversarial training.
-4. Calibrate the decision threshold for a target false-negative rate instead of a fixed 0.5.
-5. Per-generator evaluation and periodic retraining for new deepfake methods.
-6. Poisoning defences: provenance tracking, deduplication, spectral-signature outlier checks.
+## 9. Conclusion
 
-## 10. Conclusion
-
-The project turns a single-model prototype into a multimodal detection pipeline built the way a
-security tool should be: with an explicit attacker in mind, robustness measured as an evasion
-rate rather than assumed, explanations an analyst can check, and an implementation that
-doesn't trust its inputs. The remaining work is empirical: training on real data and filling in
-the evaluation tables.
+The toolkit turns the checks a security analyst performs (reading authentication headers,
+inspecting where links really go, recognising pressure tactics, looking up fact-checks) into
+fast, explainable tools anyone can run. Its web app is built on the assumption that it will be
+attacked too: secrets stay on the server, external data is treated as hostile, and browser
+security headers limit the damage if anything slips through. The main limitation is the one
+every rule-based defence has: a careful attacker can write around the rules. That's why the
+tools explain their reasoning and never declare a message safe.
 
 ## References
 
-- Baevski, A., Zhou, H., Mohamed, A., & Auli, M. (2020). wav2vec 2.0: A framework for
-  self-supervised learning of speech representations. *NeurIPS*.
-- Devlin, J., Chang, M.-W., Lee, K., & Toutanova, K. (2019). BERT: Pre-training of deep
-  bidirectional transformers for language understanding. *NAACL*.
-- Dosovitskiy, A., et al. (2021). An image is worth 16x16 words: Transformers for image
-  recognition at scale. *ICLR*.
-- Goodfellow, I., Shlens, J., & Szegedy, C. (2015). Explaining and harnessing adversarial
-  examples. *ICLR*.
-- Madry, A., Makelov, A., Schmidt, L., Tsipras, D., & Vladu, A. (2018). Towards deep learning
-  models resistant to adversarial attacks. *ICLR*.
-- Rössler, A., et al. (2019). FaceForensics++: Learning to detect manipulated facial images.
-  *ICCV*.
-- Wang, X., et al. (2020). ASVspoof 2019: A large-scale public database of synthesized, converted
-  and replayed speech. *Computer Speech & Language*.
+- Google. *Fact Check Tools API*. https://developers.google.com/fact-check/tools/api
+- Kitterman, S. (2014). *Sender Policy Framework (SPF)*. RFC 7208.
+- Crocker, D., Hansen, T., & Kucherawy, M. (2011). *DomainKeys Identified Mail (DKIM) Signatures*. RFC 6376.
+- Kucherawy, M., & Zwicky, E. (2015). *Domain-based Message Authentication, Reporting, and Conformance (DMARC)*. RFC 7489.
+- Costello, A. (2003). *Punycode*. RFC 3492.
+- OWASP. *Cross Site Scripting Prevention Cheat Sheet*. https://cheatsheetseries.owasp.org/
+- W3C. *Content Security Policy Level 3*. https://www.w3.org/TR/CSP3/
+- Wang, W. Y. (2017). "Liar, liar pants on fire": A new benchmark dataset for fake news detection. *ACL*.

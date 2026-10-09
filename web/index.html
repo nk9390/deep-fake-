@@ -113,6 +113,19 @@ tr:last-child td { border-bottom: 0; }
 .cmd { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 8px; align-content: start; min-width: 0; }
 .cmd pre { margin: 0; overflow-x: auto; font: 0.8rem/1.5 var(--font-mono); background: var(--bg); padding: 10px; border-radius: 6px; }
 .cmd p { font-size: 0.9rem; color: var(--muted); }
+.newsbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+button.primary { font: 700 0.95rem var(--font-body); color: var(--surface); background: var(--accent); border: 0; border-radius: 8px; padding: 9px 16px; cursor: pointer; }
+button.primary:disabled { opacity: 0.6; cursor: progress; }
+.tally { display: flex; flex-wrap: wrap; gap: 8px; }
+.fc-claim { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.fc-claim > p { font-weight: 700; color: var(--ink); }
+.fc-claim small { color: var(--muted); }
+.fc-review { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; align-items: baseline; font-size: 0.9rem; }
+.fc-review a, .fc-review span.t { overflow-wrap: anywhere; }
+.pill.true { background: var(--ok-soft); color: var(--ok); }
+.pill.false { background: var(--high-soft); color: var(--high); }
+.pill.mixed { background: var(--med-soft); color: var(--med); }
+.error { padding: 12px; border-radius: 6px; background: var(--med-soft); color: var(--ink); font-size: 0.92rem; }
 footer { color: var(--muted); font-size: 0.88rem; border-top: 1px solid var(--line); padding-top: 18px; }
 </style>
 </head>
@@ -120,9 +133,9 @@ footer { color: var(--muted); font-size: 0.88rem; border-top: 1px solid var(--li
 
 <div class="wrap">
   <header>
-    <span class="eyebrow">Cyber security project · multimodal ML · adversarial robustness</span>
+    <span class="eyebrow">Cyber security project · phishing · email spoofing · misinformation</span>
     <h1>Deepfake Phishing Detector</h1>
-    <p class="lede">Scores a message, a voice note and an image for social engineering and synthetic media. Paste a suspicious message below: the rule-based red-flag analyzer runs right here in your browser, nothing is sent anywhere.</p>
+    <p class="lede">A toolkit for spotting social engineering: red flags in phishing messages and links, spoofing checks on email headers, and fake news claims checked against published fact-checks. The red-flag analyzers run in your browser; only the fact-check lookup sends your claim to a server.</p>
     <div class="links">
       <a href="https://github.com/nk9390/deep-fake-">Source on GitHub</a>
       <a href="https://github.com/nk9390/deep-fake-/blob/main/docs/REPORT.md">Project report</a>
@@ -140,7 +153,7 @@ footer { color: var(--muted); font-size: 0.88rem; border-top: 1px solid var(--li
         <button class="chip" type="button" data-sample="homograph">Look-alike domain</button>
         <button class="chip" type="button" data-sample="benign">Normal email</button>
       </div>
-      <p class="note">These rules mirror <span class="mono">src/utils/phishing_indicators.py</span>. They explain a verdict to an analyst; the trained model scores the voice and image for deepfakes.</p>
+      <p class="note">Same rules as <span class="mono">python -m cyber message</span>. For a full email with headers (SPF, DKIM, DMARC, Reply-To, spoofed display names), use <span class="mono">python -m cyber email file.eml</span>.</p>
     </div>
 
     <div class="panel" aria-live="polite">
@@ -157,10 +170,40 @@ footer { color: var(--muted); font-size: 0.88rem; border-top: 1px solid var(--li
     </div>
   </div>
 
+  <section aria-label="Fake news check">
+    <span class="eyebrow">Fake news check</span>
+    <h2>Is this headline already debunked?</h2>
+    <p>Paste a headline or a short claim. The red flags update as you type. <b>Check fact-checkers</b> searches published verdicts from fact-checking organisations (PolitiFact, Snopes, Reuters, AFP, Full Fact and others) through Google's Fact Check API.</p>
+    <div class="console">
+      <div class="panel">
+        <label class="eyebrow" for="news">Headline or claim</label>
+        <textarea id="news" spellcheck="false" style="min-height: 120px"></textarea>
+        <div class="samples" aria-label="Example claims">
+          <button class="chip" type="button" data-news="5g">5G and viruses</button>
+          <button class="chip" type="button" data-news="viral">Viral share post</button>
+          <button class="chip" type="button" data-news="report">Normal report</button>
+        </div>
+        <div class="newsbar">
+          <button class="primary" type="button" id="fc-run">Check fact-checkers</button>
+          <span class="note">Matches are fact-checks of <i>similar</i> claims. Read them before deciding.</span>
+        </div>
+      </div>
+      <div class="panel" aria-live="polite">
+        <div class="verdict" id="news-verdict" data-level="low">
+          <div class="score" id="news-score">0.00</div>
+          <strong id="news-label">No red flags</strong>
+          <div class="meter"><span id="news-bar"></span></div>
+        </div>
+        <ul class="flags" id="news-flags"></ul>
+        <div id="fc-results" class="urls"></div>
+      </div>
+    </div>
+  </section>
+
   <section>
-    <span class="eyebrow">How the full detector works</span>
+    <span class="eyebrow">Optional extension: deepfake detection with ML</span>
     <h2>Three encoders, one fused verdict</h2>
-    <p>Each modality is encoded by a pretrained transformer into a single token. A fusion transformer attends over the tokens behind a learned [CLS] token and two heads predict phishing and deepfake. A missing modality, like an email with no audio, is masked out of the attention instead of being filled with fake zeros.</p>
+    <p>Not needed to use the toolkit. For deepfake voices and images the repo includes an optional ML model in <span class="mono">ml/</span>. Each modality is encoded by a pretrained transformer into a single token. A fusion transformer attends over the tokens behind a learned [CLS] token and two heads predict phishing and deepfake. A missing modality, like an email with no audio, is masked out of the attention instead of being filled with fake zeros.</p>
     <div class="pipeline">
       <svg viewBox="0 0 760 250" role="img" aria-label="Text goes through BERT, audio through Wav2Vec2, image through ViT; the three tokens are fused by a transformer that feeds a phishing head and a deepfake head.">
         <rect class="box" x="10" y="20" width="120" height="44" rx="6"/><text x="70" y="47" text-anchor="middle">text</text>
@@ -184,17 +227,17 @@ footer { color: var(--muted); font-size: 0.88rem; border-top: 1px solid var(--li
 
   <section>
     <span class="eyebrow">Threat model</span>
-    <h2>What an attacker tries, and what stops them</h2>
+    <h2>How this toolkit could be attacked, and what stops it</h2>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Threat</th><th>Attack</th><th>Defence in this project</th><th>Status</th></tr></thead>
         <tbody>
-          <tr><td>Evasion</td><td>Invisible noise on a deepfake image or voice so it scores authentic</td><td>FGSM adversarial training; PGD robustness report with evasion rate</td><td><span class="pill part">partial</span></td></tr>
-          <tr><td>Text evasion</td><td>Paraphrase, homoglyphs, look-alike domains</td><td>Red flags catch punycode and IP-address links independently of the model</td><td><span class="pill open">open</span></td></tr>
-          <tr><td>Modality dropping</td><td>Send only the modality the model is weakest on</td><td>Masked fusion, so each modality has to stand on its own</td><td><span class="pill part">partial</span></td></tr>
-          <tr><td>Malicious checkpoint</td><td>A .pt file is a pickle and can run code when loaded</td><td><span class="mono">torch.load(weights_only=True)</span></td><td><span class="pill done">mitigated</span></td></tr>
-          <tr><td>Resource exhaustion</td><td>Huge text, endless audio, decompression-bomb images</td><td>Capped text, audio read limit, PIL bomb check</td><td><span class="pill done">mitigated</span></td></tr>
-          <tr><td>Data poisoning</td><td>Backdoored training samples</td><td>Not yet: provenance tracking and audits planned</td><td><span class="pill open">open</span></td></tr>
+          <tr><td>Rule evasion</td><td>Rephrase a scam so no keyword matches; use a fresh, clean-looking domain</td><td>Several independent signals (links, headers, wording); fact-checks don't depend on wording</td><td><span class="pill part">partial</span></td></tr>
+          <tr><td>Email spoofing</td><td>Fake the From address or display name</td><td>SPF, DKIM and DMARC results, Reply-To and display-name checks</td><td><span class="pill done">detected</span></td></tr>
+          <tr><td>API key theft</td><td>Copy the fact-check key from the page and abuse the quota</td><td>Key kept in a Cloudflare server function as an encrypted secret, never sent to the browser</td><td><span class="pill done">mitigated</span></td></tr>
+          <tr><td>Malicious API data (XSS)</td><td>A fact-check result containing script or a <span class="mono">javascript:</span> link</td><td>All results escaped; only http(s) links rendered; <span class="mono">noopener</span></td><td><span class="pill done">mitigated</span></td></tr>
+          <tr><td>Quota abuse</td><td>Flood the fact-check endpoint</td><td>Query length cap, edge caching of repeat queries; rate limiting still to add</td><td><span class="pill part">partial</span></td></tr>
+          <tr><td>Oversized input</td><td>Huge email files to exhaust memory</td><td>5 MB cap on emails, 300 characters on claims</td><td><span class="pill done">mitigated</span></td></tr>
         </tbody>
       </table>
     </div>
@@ -202,29 +245,24 @@ footer { color: var(--muted); font-size: 0.88rem; border-top: 1px solid var(--li
 
   <section>
     <span class="eyebrow">Run it yourself</span>
-    <h2>From smoke test to robustness report</h2>
+    <h2>Three commands, no setup</h2>
     <div class="cmds">
-      <div class="cmd"><h3>Train</h3><pre>python -m src.train \
-  --train_manifest data/train.csv \
-  --val_manifest data/val.csv</pre><p>Best checkpoint and history go to <span class="mono">outputs/run/</span>. Add <span class="mono">--tiny</span> for a no-download smoke test.</p></div>
-      <div class="cmd"><h3>Attack it</h3><pre>python -m src.robustness \
-  --manifest data/test.csv \
-  --space vision \
-  --epsilons 0 0.01 0.03 0.1</pre><p>Evasion rate: of the fakes the model caught, how many an attacker flips to "real".</p></div>
-      <div class="cmd"><h3>Score samples</h3><pre>python -m src.inference \
-  --text "URGENT: verify..." \
-  --audio memo.wav</pre><p>Writes probabilities and red flags to <span class="mono">outputs/predictions.csv</span>.</p></div>
+      <div class="cmd"><h3>Check an email</h3><pre>python -m cyber email suspicious.eml</pre><p>SPF, DKIM, DMARC, Reply-To and Return-Path mismatches, spoofed display names, links that lie about where they go.</p></div>
+      <div class="cmd"><h3>Check a message</h3><pre>python -m cyber message \
+  "URGENT: verify at http://192.168.4.1"</pre><p>The same phishing red flags as the analyzer above.</p></div>
+      <div class="cmd"><h3>Check a news claim</h3><pre>export FACTCHECK_API_KEY=...
+python -m cyber news "5G spreads viruses"</pre><p>Fake news red flags, plus published fact-checks.</p></div>
     </div>
   </section>
 
   <footer>
-    The deepfake model needs training on labelled data (FaceForensics++, ASVspoof, a phishing email corpus) before its scores mean anything; this page only runs the rule-based analyzer. Built as a student cyber security project.
+    Python 3 only, no installs needed for the cyber tools. The optional deepfake ML model in ml/ needs training on labelled data before its scores mean anything. Built as a student cyber security project.
   </footer>
 </div>
 
 <script>
 (function () {
-  // Port of src/utils/phishing_indicators.py. Keep the two in sync.
+  // Port of cyber/phishing.py. Keep the two in sync.
   var URL_RE = /(?:https?:\/\/|www\.)[^\s<>"']+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/[^\s<>"']*/gi;
   var IP_HOST_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
   var SHORTENERS = ["bit.ly", "tinyurl.com", "t.co", "goo.gl", "is.gd", "ow.ly", "rebrand.ly", "cutt.ly"];
@@ -311,6 +349,116 @@ footer { color: var(--muted); font-size: 0.88rem; border-top: 1px solid var(--li
   msg.addEventListener("input", render);
   msg.value = SAMPLES.bank;
   render();
+
+  // Port of cyber/news.py. Keep the two in sync.
+  var NEWS = {
+    sensational: ["shocking", "you won't believe", "exposed", "they don't want you to know", "miracle", "secret cure", "banned", "mainstream media won't", "wake up", "100% proof", "bombshell", "what happens next", "doctors hate"],
+    share: ["share before", "before it's deleted", "forward this", "send this to everyone", "share this now"],
+    attribution: ["according to", "said", "says", "reported", "study", "survey", "spokesperson", "data from", "published in", "told reporters", "statement"],
+    satire: ["theonion.com", "babylonbee.com", "thebeaverton.com", "newsthump.com", "clickhole.com"]
+  };
+  var NEWS_INFO = {
+    sensational_language: ["med", "Clickbait or conspiracy wording, written to provoke rather than inform."],
+    share_pressure: ["high", "Pushes you to share before checking, a hallmark of viral misinformation."],
+    excessive_caps: ["med", "Lots of ALL-CAPS words. Newsrooms don't write that way."],
+    excessive_exclamation: ["med", "Several exclamation marks: emotional pressure instead of facts."],
+    no_attribution: ["high", "A long text that never says who reported, said or measured anything."],
+    satire_source: ["high", "Links to a satire site. The story is a joke being reshared as news."]
+  };
+  function containsAny(lowered, phrases) {
+    return phrases.some(function (p) { return new RegExp("\\b" + escapeRe(p) + "\\b").test(lowered); });
+  }
+  function analyzeNews(text) {
+    text = text || "";
+    var lowered = text.toLowerCase();
+    var found = [];
+    if (containsAny(lowered, NEWS.sensational)) found.push("sensational_language");
+    if (containsAny(lowered, NEWS.share)) found.push("share_pressure");
+    var words = text.match(/[A-Za-z]{4,}/g) || [];
+    if (words.length >= 4 && words.filter(function (w) { return w === w.toUpperCase(); }).length / words.length >= 0.3) found.push("excessive_caps");
+    if (text.indexOf("!!") !== -1 || (text.match(/!/g) || []).length >= 3) found.push("excessive_exclamation");
+    if (text.length >= 200 && !containsAny(lowered, NEWS.attribution)) found.push("no_attribution");
+    if ((text.match(URL_RE) || []).some(function (u) { var h = host(u); h = h.indexOf("www.") === 0 ? h.slice(4) : h; return NEWS.satire.indexOf(h) !== -1; })) found.push("satire_source");
+    found.sort();
+    return { indicators: found, score: Math.min(1, found.length / 3) };
+  }
+
+  var NEWS_SAMPLES = {
+    "5g": "5G towers spread the coronavirus",
+    viral: "SHOCKING!!! Doctors EXPOSED the SECRET CURE they don't want you to know about. Share before it's deleted!",
+    report: "The city council approved the new budget on Tuesday, according to a statement from the mayor's office."
+  };
+  var news = document.getElementById("news");
+  function renderNews() {
+    var r = analyzeNews(news.value);
+    var level = r.score >= 0.67 ? "high" : r.score > 0 ? "med" : "low";
+    document.getElementById("news-verdict").dataset.level = level;
+    document.getElementById("news-score").textContent = r.score.toFixed(2);
+    document.getElementById("news-label").textContent =
+      level === "high" ? "Reads like misinformation" : level === "med" ? "Some warning signs" : "No red flags";
+    var bar = document.getElementById("news-bar");
+    bar.style.width = Math.round(r.score * 100) + "%";
+    bar.parentNode.style.color = getComputedStyle(document.getElementById("news-score")).color;
+    document.getElementById("news-flags").innerHTML = r.indicators.length ? r.indicators.map(function (k) {
+      var info = NEWS_INFO[k];
+      return '<li class="sev-' + info[0] + '"><code>' + k + '</code><span class="sev">' + (info[0] === "high" ? "high" : "medium") + "</span><p>" + info[1] + "</p></li>";
+    }).join("") : '<li class="empty">No writing red flags. A calmly written false story passes these too, so check the fact-checkers.</li>';
+  }
+
+  // Everything from the API is untrusted: escape all text and only link http(s) URLs.
+  function linkOrText(url, label) {
+    return url && /^https?:\/\//i.test(url)
+      ? '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + "</a>"
+      : '<span class="t">' + esc(label) + "</span>";
+  }
+  function renderFactChecks(data) {
+    var out = document.getElementById("fc-results");
+    if (!data.claims.length) {
+      out.innerHTML = '<div class="empty">No published fact-checks match this claim. That doesn\'t make it true: look for the original source.</div>';
+      return;
+    }
+    var c = data.counts;
+    var html = '<span class="eyebrow">Fact-checks of similar claims</span><div class="tally">' +
+      '<span class="pill false">' + c["false"] + " rated false</span>" +
+      '<span class="pill mixed">' + c.mixed + " mixed or other</span>" +
+      '<span class="pill true">' + c["true"] + " rated true</span></div>";
+    data.claims.forEach(function (claim) {
+      html += '<div class="fc-claim"><p>' + esc(claim.text || "(claim text not given)") + "</p>";
+      if (claim.claimant) html += "<small>Claimed by " + esc(claim.claimant) + "</small>";
+      claim.reviews.forEach(function (rv) {
+        html += '<div class="fc-review"><span class="pill ' + esc(rv.verdict) + '">' + esc(rv.rating || rv.verdict) + "</span>" +
+          linkOrText(rv.url, rv.publisher + (rv.title ? ": " + rv.title : "")) + "</div>";
+      });
+      html += "</div>";
+    });
+    out.innerHTML = html;
+  }
+  var runBtn = document.getElementById("fc-run");
+  runBtn.addEventListener("click", function () {
+    var q = news.value.trim().slice(0, 300);
+    var out = document.getElementById("fc-results");
+    if (!q) { out.innerHTML = '<div class="error">Type a headline or claim first.</div>'; return; }
+    runBtn.disabled = true;
+    runBtn.textContent = "Checking…";
+    fetch("/api/factcheck?q=" + encodeURIComponent(q))
+      .then(function (res) {
+        return res.json().catch(function () { return { error: "The fact-check service isn't available here." }; })
+          .then(function (body) { if (!res.ok || body.error) throw new Error(body.error || "Request failed (HTTP " + res.status + ")."); return body; });
+      })
+      .then(renderFactChecks)
+      .catch(function (err) {
+        var msg = err && err.message && err.message !== "Failed to fetch" ? err.message
+          : "Couldn't reach the fact-check service. It runs on the deployed Cloudflare site, not in this preview.";
+        out.innerHTML = '<div class="error">' + esc(msg) + "</div>";
+      })
+      .then(function () { runBtn.disabled = false; runBtn.textContent = "Check fact-checkers"; });
+  });
+  document.querySelectorAll("[data-news]").forEach(function (b) {
+    b.addEventListener("click", function () { news.value = NEWS_SAMPLES[b.dataset.news]; renderNews(); document.getElementById("fc-results").innerHTML = ""; });
+  });
+  news.addEventListener("input", renderNews);
+  news.value = NEWS_SAMPLES.viral;
+  renderNews();
 })();
 </script>
 </body>

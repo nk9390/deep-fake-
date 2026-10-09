@@ -1,7 +1,7 @@
 [project]
 name = "deepfake-phishing-detector"
-version = "0.2.0"
-description = "Multimodal (text, audio, image) detector for deepfake-based phishing"
+version = "0.3.0"
+description = "Phishing, email-spoofing and fake news detection toolkit, with an optional deepfake ML extension"
 requires-python = ">=3.10"
 
 [tool.pytest.ini_options]

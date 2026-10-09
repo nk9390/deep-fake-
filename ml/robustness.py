@@ -9,11 +9,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.checkpoint import load_checkpoint
-from src.data.loading import build_loader, load_manifest
-from src.engine import to_device
-from src.utils.adversarial import feature_attack, input_attack
-from src.utils.losses import TASKS
+from ml.checkpoint import load_checkpoint
+from ml.data.loading import build_loader, load_manifest
+from ml.engine import to_device
+from ml.utils.adversarial import feature_attack, input_attack
+from ml.utils.losses import TASKS
 
 
 def _probs(out):

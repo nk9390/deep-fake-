@@ -1,145 +1,102 @@
-# Deepfake-Phishing Detector
+# Deepfake Phishing Detector
 
-A multimodal detector for **deepfake-based social engineering**: phishing messages that come
-with a cloned voice note or a manipulated photo/video frame ("hi, it's your CEO, here's a voice
-memo, buy these gift cards"). It scores each sample on two tasks:
+A cyber security toolkit for spotting **social engineering**: phishing messages, spoofed
+emails and fake news. Built as a student security project, with a threat model, a project
+report, and a web app you can deploy on Cloudflare.
 
-| task | 1 means | signal from |
+| tool | what it catches | run it |
 | --- | --- | --- |
-| `phishing` | the message is a social-engineering attempt | mostly text |
-| `deepfake` | the audio or image is synthetic/manipulated | mostly audio + image |
+| **Phishing red flags** | IP-address and look-alike (punycode) links, shorteners, `user@host` URL tricks, urgency, password/payment requests, "I'm your CEO" | `python -m cyber message "..."` |
+| **Email forensics** | SPF / DKIM / DMARC failures, Reply-To and Return-Path mismatches, spoofed display names, links whose text lies about where they go | `python -m cyber email file.eml` |
+| **Fake news check** | sensational wording, share pressure, ALL CAPS, no sources, satire sites; plus **published fact-checks** from PolitiFact, Snopes, Reuters, AFP and others | `python -m cyber news "..."` |
+| **Web app** | the phishing and fake news checks in the browser, with a secure fact-check API proxy | `web/` + `functions/` on Cloudflare Pages |
 
-Built as a security project, so it also covers the attacker side:
+The cyber tools are plain Python 3: no packages to install. An **optional** ML extension for
+detecting deepfake voices and images lives in [`ml/`](ml/); you don't need it for anything above.
 
-- **Threat model** — who attacks this system and how: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
-- **Adversarial training** — FGSM perturbations of the modality embeddings during training.
-- **Robustness report** — PGD/FGSM evasion attacks on raw pixels, raw audio, or embeddings, with
-  the *evasion rate*: how often a malicious sample the detector caught can be pushed past it.
-- **Explainable red flags** — rule-based phishing indicators (IP-address and punycode URLs,
-  shorteners, urgency, credential/payment requests, authority impersonation) next to every score.
-- **Secure engineering** — checkpoints load with `weights_only=True` (no pickle code execution),
-  inputs are validated, and text/audio/image reads are size-capped.
-
-## How it works
-
-```
-text  ──BERT──────┐
-audio ──Wav2Vec2──┼─► 1 token each ─► [CLS] + fusion transformer ─► phishing head
-image ──ViT───────┘   (+ modality embedding;                       └► deepfake head
-                       missing modalities are masked out)
-```
-
-Any modality can be missing (an email has no audio; a voice note has no image). Missing ones
-are masked out of the fusion attention, so their placeholder inputs can't affect the prediction.
-
-## Setup
+## Quick start
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-pytest -q   # runs offline on tiny random models, ~1 min on CPU
+git clone https://github.com/nk9390/deep-fake-.git && cd deep-fake-
+
+python -m cyber email samples/phishing.eml     # a spoofed "PayPal" email
+python -m cyber email samples/legit.eml        # a clean one, for comparison
+python -m cyber message "URGENT: verify your password at http://192.168.4.1/login"
+python -m cyber news "SHOCKING!!! Share before it's deleted"
 ```
 
-Hugging Face backbones (~1.2 GB) download on the first real training run.
+Example output for the spoofed email:
 
-## Data
-
-Datasets are CSV manifests. Paths are relative to the manifest file; every column is optional
-except that each row needs at least one of `text`, `audio`, `image`. Labels are `1`, `0`, or
-empty (unknown — that task is skipped for the row, so partially labelled data works).
-
-```csv
-id,text,audio,image,phishing,deepfake
-call42,"It's me, wire the money today",clips/call42.wav,,1,1
-mail07,"Your invoice is attached",,,0,
-face13,,,frames/face13.jpg,,1
+```
+From: security-alert@paypa1-support.com
+Subject: URGENT: your account has been suspended
+Sender authentication: failed or missing
+Header red flags: display_name_spoofing, dkim_fail, dmarc_fail, link_text_mismatch, reply_to_mismatch, return_path_mismatch, spf_fail
+  link shows 'https://www.paypal.com/signin' but goes to http://192.168.4.1/login
+Content red flags: credential_request, ip_address_url, unencrypted_link, urgency
 ```
 
-Audio: any format libsndfile reads (wav/flac/ogg/mp3), mixed to mono, resampled to 16 kHz,
-first 4 s used. Video: extract a frame (e.g. `ffmpeg -i in.mp4 -vf "select=eq(n\,0)" frame.jpg`).
+To check a real email: in Gmail open the message, **⋮ → Download message**; in Outlook
+**File → Save As** (.eml). Then run `python -m cyber email` on the file.
 
-Public datasets to build a real manifest from:
+### Fact-checking
 
-| modality | datasets |
-| --- | --- |
-| deepfake images/video | FaceForensics++, Celeb-DF, DFDC (Kaggle) |
-| deepfake audio | ASVspoof 2019/2021 (LA), WaveFake, In-the-Wild |
-| phishing text | Nazario phishing corpus, Enron (benign), Kaggle "Phishing Email Dataset" |
+The news command and the web app search Google's Fact Check Tools API, which collects verdicts
+published by fact-checking organisations.
 
-There's no public dataset with all three aligned, so a realistic setup is one manifest mixing
-rows from each source with the other modalities left empty, plus your own paired samples.
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a project, enable
+   **Fact Check Tools API**, and create an **API key** (APIs & Services → Credentials). It's free.
+2. Command line: `export FACTCHECK_API_KEY=your-key` then `python -m cyber news "claim"`.
+3. Web app: add it in Cloudflare (below). Never put the key in `web/` or commit it.
 
-## Usage
+A match is a fact-check of a *similar* claim, so read it. No match doesn't mean a claim is
+true: new rumours aren't checked yet.
+
+## Web app on Cloudflare Pages
+
+`web/index.html` is the page; `functions/api/factcheck.js` is a small server function that
+calls the fact-check API, so the key never reaches the browser.
+
+1. Cloudflare dashboard → **Compute → Workers & Pages → Create application → Pages →
+   Import an existing Git repository** → pick this repo.
+2. Production branch `main`, framework preset **None**, build command empty, build output
+   directory **`web`** → **Save and Deploy**. Cloudflare finds `functions/` automatically.
+3. Project → **Settings → Variables and Secrets → Add**: name `FACTCHECK_API_KEY`, type
+   **Secret**, value your Google key. Then **Deployments → Retry deployment** so it takes effect.
+
+You get a public `https://<project>.pages.dev` link, and every push to `main` redeploys it.
+Dragging the `web` folder into Cloudflare also works for the page, but uploads that way can't
+run the fact-check function.
+
+## Tests
 
 ```bash
-# Smoke test on synthetic data (no download)
-python -m src.train --tiny --epochs 2
-
-# Real training
-python -m src.train --train_manifest data/train.csv --val_manifest data/val.csv \
-    --epochs 5 --batch_size 8 --output_dir outputs/run
-#   --freeze_backbones   train only fusion + heads (fast, small GPU)
-#   --adv_epsilon 0      disable adversarial training
-
-# Metrics: accuracy, precision, recall, F1, AUC and false-negative rate per task
-python -m src.evaluate --checkpoint outputs/run/best.pt --manifest data/test.csv
-
-# Robustness: evasion attacks with growing budgets
-python -m src.robustness --checkpoint outputs/run/best.pt --manifest data/test.csv \
-    --space vision --epsilons 0 0.01 0.03 0.1 --steps 10
-#   --space feature | vision | audio | input (vision+audio)
-
-# Score new samples (writes CSV with probabilities + red flags)
-python -m src.inference --manifest data/test/manifest.csv
-python -m src.inference --text "URGENT: verify your password at http://192.168.4.1" --audio memo.wav
-python -m src.visualize_results          # bar chart -> outputs/plots/predictions.png
+pip install pytest
+pytest -q          # cyber tests; ML tests are skipped unless PyTorch is installed
 ```
 
-## Live demo (Cloudflare Pages)
-
-`web/index.html` is a static page: the phishing red-flag analyzer running in the browser (same
-rules as the Python module), plus the architecture and threat model. No build step. Two ways to
-put it on Cloudflare:
-
-1. **Dashboard, no tokens:** Cloudflare dashboard → Workers & Pages → Create → Pages → Connect
-   to Git → pick this repo → framework preset *None*, build command empty, output directory
-   `web`. Every push to `main` redeploys.
-2. **GitHub Actions:** add repository secrets `CLOUDFLARE_API_TOKEN` (permission *Cloudflare
-   Pages: Edit*) and `CLOUDFLARE_ACCOUNT_ID`. `.github/workflows/deploy-pages.yml` then deploys
-   to `deep-fake-detector.pages.dev` on every push to `main` that changes `web/`.
-
-The PyTorch model doesn't run on Cloudflare Pages (static hosting, no Python). To serve the
-model, run `src.inference` on a machine with Python, or wrap it in a small API on a GPU host.
+CI runs the cyber tests and the ML tests on every push.
 
 ## Project layout
 
 ```
-src/
-  config.py              model config (saved inside every checkpoint)
-  models/                backbones + fusion model
-  data/                  CSV manifest + mock datasets, batching
-  utils/adversarial.py   FGSM/PGD on embeddings or raw inputs
-  utils/phishing_indicators.py   rule-based red flags
-  utils/metrics.py       detection metrics
-  engine.py              train / predict loops
-  train.py evaluate.py robustness.py inference.py visualize_results.py   CLIs
-web/index.html           static demo page (Cloudflare Pages)
-tests/                   offline tests (tiny models)
-docs/THREAT_MODEL.md     attackers, threats, mitigations
-docs/REPORT.md           full project report
+cyber/
+  phishing.py         phishing red flags in text and links
+  email_headers.py    SPF/DKIM/DMARC, header mismatches, display-name spoofing, lying links
+  news.py             fake news red flags
+  factcheck.py        Google Fact Check API client
+  __main__.py         `python -m cyber` command line
+functions/api/factcheck.js   Cloudflare server function (keeps the API key secret)
+web/index.html               web app
+samples/                     example emails
+tests/                       cyber tests (tests/ml: ML extension tests)
+docs/REPORT.md               project report
+docs/THREAT_MODEL.md         threat model
+ml/                          optional deepfake ML extension (see ml/README.md)
 ```
-
-## Limitations
-
-- Trained only on mock data, the model detects nothing real. Its numbers mean something only
-  after training on real labelled data.
-- One frame per video and one fixed clip length per audio; no temporal modelling.
-- Text attacks (paraphrasing, typo-squatting words) aren't in the robustness report yet;
-  see the threat model for next steps.
 
 ## Report
 
-The full write-up is in **[docs/REPORT.md](docs/REPORT.md)**: problem and real-world cases,
-threat model, architecture, adversarial training, robustness methodology (evasion rate), secure
-engineering, limitations, future work and references. Its results tables are ready to fill in
-once the model is trained on real data.
+The full write-up is in **[docs/REPORT.md](docs/REPORT.md)**: the problem with real cases, the
+threat model, how each detector works, the secure design of the web app, testing, limitations
+and future work.

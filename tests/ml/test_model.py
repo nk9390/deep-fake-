@@ -1,9 +1,9 @@
 import torch
 
-from src.data.loading import build_loader, load_manifest
-from src.models.multimodal_transformer import MultimodalDetector
-from src.utils.adversarial import feature_attack, input_attack
-from src.utils.losses import multitask_loss
+from ml.data.loading import build_loader, load_manifest
+from ml.models.multimodal_transformer import MultimodalDetector
+from ml.utils.adversarial import feature_attack, input_attack
+from ml.utils.losses import multitask_loss
 
 
 def _batch(sample_dir, cfg):

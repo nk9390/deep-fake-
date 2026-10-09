@@ -4,11 +4,11 @@ from pathlib import Path
 
 import torch
 
-from src.checkpoint import load_checkpoint
-from src.data.dataset import ManifestDataset
-from src.data.loading import build_loader, load_manifest
-from src.engine import predict
-from src.utils.phishing_indicators import analyze_text
+from cyber.phishing import analyze_text
+from ml.checkpoint import load_checkpoint
+from ml.data.dataset import ManifestDataset
+from ml.data.loading import build_loader, load_manifest
+from ml.engine import predict
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 FIELDS = ["id", "phishing_prob", "phishing_pred", "deepfake_prob", "deepfake_pred", "red_flags"]
@@ -44,7 +44,7 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     if not Path(args.checkpoint).is_file():
-        raise SystemExit(f"Checkpoint not found: {args.checkpoint} (train one with: python -m src.train)")
+        raise SystemExit(f"Checkpoint not found: {args.checkpoint} (train one with: python -m ml.train)")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, _ = load_checkpoint(args.checkpoint, device)
     loader = build_loader(build_dataset(args, model.cfg), model.cfg, args.batch_size)

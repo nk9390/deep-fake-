@@ -4,9 +4,9 @@ from pathlib import Path
 
 import torch
 
-from src.checkpoint import load_checkpoint
-from src.data.loading import build_loader, load_manifest
-from src.engine import evaluate
+from ml.checkpoint import load_checkpoint
+from ml.data.loading import build_loader, load_manifest
+from ml.engine import evaluate
 
 
 def main(argv=None):

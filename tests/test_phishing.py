@@ -1,4 +1,4 @@
-from src.utils.phishing_indicators import analyze_text
+from cyber.phishing import analyze_text
 
 
 def test_flags_classic_phishing():

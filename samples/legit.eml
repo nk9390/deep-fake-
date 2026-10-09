@@ -1,0 +1,9 @@
+Return-Path: <notices@university.edu>
+Authentication-Results: mx.example.edu; spf=pass smtp.mailfrom=university.edu; dkim=pass header.d=university.edu; dmarc=pass header.from=university.edu
+From: Library Services <notices@university.edu>
+To: student@example.edu
+Subject: Library hours this week
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<p>The library closes early on Friday. Details at <a href="https://library.university.edu/hours">library.university.edu/hours</a>.</p>

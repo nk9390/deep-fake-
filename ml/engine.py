@@ -1,8 +1,8 @@
 import torch
 
-from src.utils.adversarial import feature_attack
-from src.utils.losses import TASKS, has_labels, multitask_loss
-from src.utils.metrics import compute_metrics
+from ml.utils.adversarial import feature_attack
+from ml.utils.losses import TASKS, has_labels, multitask_loss
+from ml.utils.metrics import compute_metrics
 
 
 def to_device(batch, device):

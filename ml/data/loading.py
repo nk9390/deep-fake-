@@ -1,9 +1,9 @@
 from torch.utils.data import DataLoader
 
-from src.config import ModelConfig
-from src.data.collate import MultimodalCollator
-from src.data.dataset import ManifestDataset
-from src.models.backbones import build_processors
+from ml.config import ModelConfig
+from ml.data.collate import MultimodalCollator
+from ml.data.dataset import ManifestDataset
+from ml.models.backbones import build_processors
 
 
 def load_manifest(path, cfg: ModelConfig):
